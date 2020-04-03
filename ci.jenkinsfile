@@ -1,0 +1,212 @@
+#!groovy
+
+@Library('myjenkinslib@master') _ //该行表示引入了名称为"myjenkinslib"的共享库，且版本分支为master版本分支,即"引用了自己"。
+
+def tools = new org.devops.tools();
+//tools工具获取方法的相对路径是在当前src目录下的org/devops/下的tools.groovy文件. 
+//def build = new org.devops.build();
+def build = new org.devops.build();
+//将当前目录下/src/org/devops/build.groovy文件进行实例化引用.
+def deploySalt = new org.devops.deploySalt();
+//将当前目录下/src/org/devops/deploySalt.groovy文件进行实例化引用.
+
+
+String buildType = "${env.buildType}";
+String buildShell = "${env.buildShell}";  //从环境变量读取用于传入 build 实例化对象的两个参数.
+
+String saltHosts = "${env.saltHosts}"; //从环境变量读取用于传入到需要进行部署的主机参数.该参数是一个String列表 可以是hostA,hostB,hostC
+String saltMod = "${env.saltMod}"//从环境变量读取用于传入到需要进行部署的salt参数，如："test.ping"  "cmd.run".
+String saltParameters = "${env.saltParameters}" //传入的参数如cmd.run 模块需要传入的参数是"ls /" 可以为空"".
+
+String workspace = "/opt/jenkins/workspace"
+String mvnParams = "${env.mvnParams}"  //通过env的方式获取参数并引用 mvnParams 来自于 当前pipeline 的参数化构建选项。 
+String antParams = "${env.antParams}"  //通过当前jenkins的env方式获取ant命令的可选参数。
+String npmParams = "${env.npmParams}"  //进行读取并选择环境变量当中npm命令行参数。
+//Pipeline
+pipeline {
+    environment{
+        test = 'abcd'
+    }
+    agent { node {  label "master"   //指定运行节点的标签或者名称
+                    customWorkspace "${workspace}"   //指定运行工作目录（可选）
+            }
+    }
+// 没有用 未知？
+//    tools {
+//        maven 'm2'
+//    }
+
+    options {
+        timestamps()  //日志会打印有时间
+        skipDefaultCheckout()  //删除隐式checkout scm语句
+        disableConcurrentBuilds() //禁止并行
+        timeout(time: 1, unit: 'HOURS')  //流水线超时设置1h
+    }
+
+    stages {
+	stage("Build_various_Tools"){
+		steps{
+			script{
+			build.Build(buildType,buildShell);
+			//引用全局已经实例化过的build 并调用Build方法，传入参数来自于全局env.buildType与build.Shell.
+				}
+			}
+		}
+	stage("Deploy_salt_hosts"){
+		steps{
+			script{
+			/*
+			String deployHosts = "hostA,hostB,hostC,hostD";
+			关于主机的信息不建议在全局参数配置当中定义，可以采用以下局部变量方式来定义：
+			hosts = saltHosts.split(",").toList();
+			*/
+				hosts = saltHosts.split(",").toList();
+				for (H in hosts){
+					deploySalt.SaltDeploy(H,saltMod,saltParameters);
+			//引用实例化过的deploySalt，调用当中的SaltDeploy方法读取传入的主机信息与参数信息.
+					}
+				}
+			}
+		}
+	    
+	
+	//用于校验当前阶段的各种构建工具版本示例
+	stage("Maven_version_show"){
+		steps{
+			//sh "mvn -v"
+			sh "mvn ${mvnParams}";
+		}
+	}
+   
+	stage("Ant_version_show"){
+		steps{
+			script{
+				try{
+					antHome = tool "ANT";
+					sh "$antHome/bin/ant ${antParams}";
+				}
+				catch (e){
+						Println(e);
+				}
+				//定义一个异常捕捉，ant可能会出现异常状态导致编译失败，因此使用try{}catch(){}来进行捕获异常并打印异常。
+			}
+		}
+	}
+	
+	stage("Gradle_version_show"){
+		steps{
+			script{
+				gradleHome = tool "GRADLE"
+				sh "${gradleHome}/bin/gradle -v";
+			}
+		}
+	}
+	stage("Npm_version_show"){
+		steps{
+			script{
+				npmHome = tool "NPM"
+				sh "export PATH=\$PATH:${npmHome}/bin && ${npmHome}/bin/npm ${npmParams}";
+				sh "${npmHome}/bin/node -v";
+				/*默认会失败并提示"/usr/bin/env: node: No such file or directory"需要确保在build的主机上已经通过
+				npm install -g npm进行全局安装npm.且在当前没有办法获取到PATH的环境变量，
+				因此将PATH环境变量添加npm命令行的环境变量"export PATH=\$PATH:${npmHome}/bin "
+				*/
+			}
+		}
+	}
+
+        //下载代码
+        stage("GetCode"){ //阶段名称
+           when { environment name: 'test', value: 'abcd' }   //该段会去进行判断，如果判断没有该环境变量过那么stage("GetCode")则不会执行。
+           input {
+                 message 'aaa'
+                    id 'stg_input'
+                    ok 'button01'
+                    submitter 'admin,kid'
+                    parameters {
+                    choice choices: ['A', 'B', 'C'], description: 'input 申明测试样例', name: 'input choose one'
+                    }
+                 }
+            steps{  //步骤
+                timeout(time:5, unit:"MINUTES"){   //步骤超时时间
+                    script{ //填写运行代码
+                        println('获取代码')
+                        tools.PrintMes("获取代码",'green')
+                        println("${test}")//打印出环境变量$test
+                        
+                        input id: 'Check your Process ! ', message: '是继续构建？', ok: '是，继续！', parameters: [choice(choices: ['True', 'False'], description: '', name: 'This is a example of input choose')], submitter: 'kid,admin'
+                        
+                        input id: 'Input Test', message: 'Check U input ', ok: 'button01', parameters: [choice(choices: ['True', 'False', 'Unknown'], description: '测试 input 功能', name: 'T or F')], submitter: 'kid,admin'
+                        
+                    }
+                }
+            }
+        }
+
+        stage("Paralle Sample"){   //并行构建示例
+            failFast true
+            parallel {
+        
+                //构建
+                stage("Build"){
+                    steps{
+                        timeout(time:20, unit:"MINUTES"){
+                            script{
+                                println('应用打包')
+                                tools.PrintMes("应用打包",'green')
+                                mvnHome = tool "m2"
+                                println(mvnHome)
+                            }
+                        }
+                    }
+                }
+        
+                //代码扫描
+                stage("CodeScan"){
+                    steps{
+                        /*
+						无法直接在steps当中使用sh命令。
+                        sh 'mvn --version'
+						*/
+                        timeout(time:30, unit:"MINUTES"){
+                            script{
+                                print("代码扫描")
+                                tools.PrintMes("代码扫描",'green')
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    //构建后操作
+    post {
+        always {
+            script{
+                println("always")
+            }
+        }
+
+        success {
+            script{
+                currentBuild.description = "\n 构建成功!" 
+                tools.PrintMes("构建成功",'green')
+            }
+        }
+
+        failure {
+            script{
+                currentBuild.description = "\n 构建失败!" 
+                tools.PrintMes("构建失败",'red')
+            }
+        }
+
+        aborted {
+            script{
+                currentBuild.description = "\n 构建取消!" 
+                tools.PrintMes("构建取消",'blue')
+            }
+        }
+    }
+}
